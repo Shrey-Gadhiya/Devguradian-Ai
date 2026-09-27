@@ -1,0 +1,287 @@
+import { useState } from 'react'
+import { useAnalysis } from '../context/AnalysisContext'
+import { Lock, ExternalLink, Shield, ChevronDown, ChevronRight } from 'lucide-react'
+import SeverityBadge from '../components/SeverityBadge'
+import ScoreCard from '../components/ScoreCard'
+import EmptyState from '../components/EmptyState'
+import DetailDrawer from '../components/DetailDrawer'
+import FileIcon from '../components/FileIcon'
+import MetricRow from '../components/MetricRow'
+import CopyButton from '../components/CopyButton'
+import DiffBlock from '../components/DiffBlock'
+import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis } from 'recharts'
+
+const CAT_COLORS = ['#6366f1','#3b82f6','#8b5cf6','#f97316','#22c55e','#eab308','#06b6d4','#ec4899']
+
+const OWASP_MAP = {
+  'Injection': 'A03:2021', 'SQL Injection': 'A03:2021', 'XSS': 'A03:2021',
+  'Secrets': 'A02:2021', 'Cryptography': 'A02:2021',
+  'Path Traversal': 'A01:2021', 'SSRF': 'A10:2021',
+  'Authentication': 'A07:2021', 'CORS': 'A05:2021',
+  'Information Disclosure': 'A05:2021', 'Dependency Risk': 'A06:2021',
+}
+
+const CustomTooltip = ({ active, payload }) => {
+  if (!active || !payload?.length) return null
+  return (
+    <div style={{ background:'#0d0f1a', border:'1px solid rgba(255,255,255,0.1)', borderRadius:10, padding:'8px 12px', fontSize:12 }}>
+      <div style={{ color:'#94a3b8', marginBottom:2 }}>{payload[0]?.name}</div>
+      <div style={{ color:payload[0]?.payload?.fill || '#818cf8', fontWeight:700, fontSize:16 }}>{payload[0]?.value}</div>
+    </div>
+  )
+}
+
+export default function Security() {
+  const { results } = useAnalysis()
+  const [selected, setSelected] = useState(null)
+  const [expandedGroup, setExpandedGroup] = useState(null)
+
+  if (!results) return <EmptyState icon={Lock} message="Run analysis to see the full security scan results." />
+
+  const { security, dependencies, findings, report } = results
+  const secFindings = findings.filter(f => f.source === 'security')
+  const allSecAndDep = findings.filter(f => f.source === 'security' || f.source === 'dependency')
+
+  // Category map
+  const catMap = {}
+  for (const f of allSecAndDep) catMap[f.category] = (catMap[f.category] || 0) + 1
+  const categoryData = Object.entries(catMap).map(([name, value]) => ({ name, value })).sort((a,b)=>b.value-a.value)
+
+  // Severity distribution for bar chart
+  const sevData = [
+    { name: 'Critical', value: security.summary.bySeverity.critical, fill: '#f87171' },
+    { name: 'High',     value: security.summary.bySeverity.high,     fill: '#fb923c' },
+    { name: 'Medium',   value: security.summary.bySeverity.medium,   fill: '#facc15' },
+    { name: 'Low',      value: security.summary.bySeverity.low,      fill: '#4ade80' },
+  ]
+
+  // Group findings by category
+  const byCategory = {}
+  for (const f of secFindings) {
+    if (!byCategory[f.category]) byCategory[f.category] = []
+    byCategory[f.category].push(f)
+  }
+
+  const fix = selected ? results.fixes?.find(fix => fix.ruleId === selected.ruleId && fix.file === selected.file) : null
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="page-title">Security Analysis</h1>
+        <p className="page-subtitle">{security.summary.filesScanned} files scanned · {allSecAndDep.length} total security findings</p>
+      </div>
+
+      {/* Score row */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <ScoreCard label="Security Score" score={report.securityScore} />
+        {[
+          { label:'Critical',   val: security.summary.bySeverity.critical, color:'#f87171', grad:'linear-gradient(90deg,#f87171,#ef4444)' },
+          { label:'High Risk',  val: security.summary.bySeverity.high,     color:'#fb923c', grad:'linear-gradient(90deg,#fb923c,#f97316)' },
+          { label:'Dep. Risks', val: dependencies.summary.total,           color:'#facc15', grad:'linear-gradient(90deg,#facc15,#eab308)' },
+        ].map(({ label, val, color, grad }) => (
+          <div key={label} className="stat-card" style={{ '--accent-gradient': grad }}>
+            <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">{label}</div>
+            <div className="text-[40px] font-bold tabular-nums mt-2 leading-none" style={{ color }}>{val}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Charts */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+
+        {/* Donut pie */}
+        <div className="card">
+          <div className="section-heading">By Category</div>
+          {categoryData.length > 0 ? (
+            <ResponsiveContainer width="100%" height={172}>
+              <PieChart>
+                <Pie data={categoryData} dataKey="value" nameKey="name"
+                  cx="50%" cy="50%" innerRadius={44} outerRadius={72}
+                  paddingAngle={3} strokeWidth={0}>
+                  {categoryData.map((_, i) => <Cell key={i} fill={CAT_COLORS[i % CAT_COLORS.length]} fillOpacity={0.88} />)}
+                </Pie>
+                <Tooltip content={<CustomTooltip />} />
+              </PieChart>
+            </ResponsiveContainer>
+          ) : <div className="text-slate-600 text-sm py-8 text-center">No findings</div>}
+          <div className="flex flex-wrap gap-x-3 gap-y-1.5 mt-1">
+            {categoryData.map((d, i) => (
+              <div key={d.name} className="flex items-center gap-1.5 text-[10px] text-slate-500">
+                <span className="w-2 h-2 rounded-sm flex-shrink-0" style={{ background: CAT_COLORS[i % CAT_COLORS.length] }} />
+                {d.name} ({d.value})
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Severity bar */}
+        <div className="card">
+          <div className="section-heading">Severity Distribution</div>
+          <ResponsiveContainer width="100%" height={172}>
+            <BarChart data={sevData} barSize={28} layout="vertical">
+              <XAxis type="number" tick={{ fill:'#475569', fontSize:10 }} axisLine={false} tickLine={false} />
+              <YAxis type="category" dataKey="name" tick={{ fill:'#475569', fontSize:10 }} axisLine={false} tickLine={false} width={52} />
+              <Tooltip content={<CustomTooltip />} cursor={{ fill:'rgba(255,255,255,0.03)' }} />
+              <Bar dataKey="value" radius={[0,4,4,0]}>
+                {sevData.map((e,i) => <Cell key={i} fill={e.fill} fillOpacity={0.9} />)}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+
+        {/* OWASP score card */}
+        <div className="card">
+          <div className="section-heading">OWASP Top 10 Coverage</div>
+          <div className="space-y-2">
+            {Object.entries(OWASP_MAP)
+              .filter(([cat]) => (catMap[cat] || 0) > 0)
+              .slice(0, 7)
+              .map(([cat, owasp]) => (
+              <div key={owasp} className="flex items-center gap-2 py-1">
+                <span className="badge-high text-[9px] flex-shrink-0">{owasp}</span>
+                <span className="text-[11px] text-slate-500 flex-1 truncate">{cat}</span>
+                <span className="text-[11px] font-semibold text-red-400 tabular-nums">{catMap[cat]}</span>
+              </div>
+            ))}
+          </div>
+          <div className="mt-3 pt-3" style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+            <div className="text-[11px] text-slate-600">
+              Scanned against <span className="text-slate-400 font-semibold">18 OWASP rules</span> across {security.summary.filesScanned} files
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Findings grouped by category */}
+      <div className="card">
+        <div className="section-heading">Security Findings by Category</div>
+        <div className="space-y-1">
+          {Object.entries(byCategory).map(([cat, items]) => {
+            const isOpen = expandedGroup === cat
+            const critCount = items.filter(f => f.severity === 'critical').length
+            const highCount = items.filter(f => f.severity === 'high').length
+            return (
+              <div key={cat} className="rounded-xl overflow-hidden" style={{ border: '1px solid rgba(255,255,255,0.07)' }}>
+                {/* Group header */}
+                <button
+                  className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-white/5 transition-colors"
+                  onClick={() => setExpandedGroup(isOpen ? null : cat)}
+                >
+                  <div className="flex-1 flex items-center gap-2.5">
+                    <Shield size={12} className="text-indigo-400 flex-shrink-0" />
+                    <span className="text-[13px] font-semibold text-slate-200">{cat}</span>
+                    {OWASP_MAP[cat] && <span className="badge-info text-[10px]">{OWASP_MAP[cat]}</span>}
+                    {critCount > 0 && <span className="badge-critical text-[10px]">{critCount}</span>}
+                    {highCount > 0 && <span className="badge-high text-[10px]">{highCount}</span>}
+                  </div>
+                  <span className="text-[11px] text-slate-600">{items.length} finding{items.length !== 1 && 's'}</span>
+                  {isOpen ? <ChevronDown size={13} className="text-slate-600" /> : <ChevronRight size={13} className="text-slate-600" />}
+                </button>
+                {/* Group body */}
+                {isOpen && (
+                  <div className="border-t border-white/5 divide-y divide-white/5">
+                    {items.map((f, i) => (
+                      <button key={i} className="w-full flex items-start gap-3 px-4 py-2.5 text-left hover:bg-white/5 transition-colors"
+                        onClick={() => setSelected(f)}>
+                        <SeverityBadge severity={f.severity} />
+                        <div className="flex-1 min-w-0">
+                          <div className="text-[12px] text-slate-200 truncate">{f.message}</div>
+                          <div className="flex items-center gap-2 mt-0.5">
+                            <FileIcon path={f.file} size={10} />
+                            <span className="text-[10px] text-slate-600 font-mono">{f.file}:{f.line}</span>
+                          </div>
+                        </div>
+                        <span className="text-[10px] text-slate-700 font-mono flex-shrink-0">{f.ruleId}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* Dependency risks */}
+      <div className="card">
+        <div className="section-heading">Dependency Risks <span className="text-slate-600 font-normal normal-case">({dependencies.totalDependencies} packages checked)</span></div>
+        {dependencies.findings.length === 0 ? (
+          <div className="text-slate-600 text-sm py-4 text-center">✓ No risky dependencies found</div>
+        ) : (
+          <div className="space-y-2">
+            {dependencies.findings.map((f, i) => (
+              <div key={i} className="flex items-start gap-3 p-3 rounded-xl cursor-pointer hover:bg-white/5 transition-colors"
+                style={{ border: '1px solid rgba(255,255,255,0.06)' }}
+                onClick={() => setSelected(f)}>
+                <SeverityBadge severity={f.severity} />
+                <div className="flex-1 min-w-0">
+                  <div className="text-[12px] font-mono font-semibold text-slate-300">{f.evidence}</div>
+                  <div className="text-[11px] text-slate-600 mt-0.5 leading-snug">{f.message}</div>
+                  {f.remediation && <div className="text-[11px] text-indigo-400 mt-1">{f.remediation}</div>}
+                </div>
+                {f.cve && <span className="badge-critical text-[10px] flex-shrink-0">{f.cve}</span>}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Detail Drawer */}
+      <DetailDrawer
+        open={!!selected}
+        onClose={() => setSelected(null)}
+        title={selected?.message}
+        subtitle={selected?.file ? `${selected.file} : line ${selected.line}` : undefined}
+      >
+        {selected && (
+          <>
+            <div className="flex items-center gap-2 flex-wrap">
+              <SeverityBadge severity={selected.severity} />
+              <span className="badge-info">{selected.category}</span>
+              {OWASP_MAP[selected.category] && <span className="badge-high text-[10px]">{OWASP_MAP[selected.category]}</span>}
+              <span className="text-[11px] font-mono text-slate-600 bg-white/5 px-2 py-1 rounded">{selected.ruleId}</span>
+              {selected.cve && <span className="badge-critical">{selected.cve}</span>}
+            </div>
+
+            <div className="rounded-xl p-4" style={{ background: 'rgba(0,0,0,0.3)' }}>
+              <div className="text-[10px] font-semibold text-slate-600 uppercase tracking-wider mb-2">Evidence</div>
+              <div className="flex items-start gap-2">
+                <code className="text-amber-400 font-mono text-[12px] break-all flex-1">{selected.evidence}</code>
+                <CopyButton text={selected.evidence} />
+              </div>
+            </div>
+
+            {selected.remediation && (
+              <div className="rounded-xl p-4" style={{ background: 'rgba(99,102,241,0.07)', border: '1px solid rgba(99,102,241,0.18)' }}>
+                <div className="text-[10px] font-semibold text-indigo-400 uppercase tracking-wider mb-2">Remediation</div>
+                <p className="text-[13px] text-slate-300 leading-relaxed">{selected.remediation}</p>
+              </div>
+            )}
+
+            {fix?.codeExample && (
+              <div>
+                <div className="text-[10px] font-semibold text-slate-600 uppercase tracking-wider mb-2">Code Fix</div>
+                <DiffBlock code={fix.codeExample} language={selected.file?.split('.').pop() || 'js'} />
+              </div>
+            )}
+
+            <div className="rounded-xl overflow-hidden" style={{ border: '1px solid rgba(255,255,255,0.07)' }}>
+              <div className="px-4 py-2 text-[10px] font-semibold text-slate-600 uppercase tracking-wider"
+                style={{ background: 'rgba(255,255,255,0.03)', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                Details
+              </div>
+              <div className="px-4 divide-y divide-white/5">
+                <MetricRow label="Rule ID"   value={selected.ruleId} mono />
+                <MetricRow label="Severity"  value={selected.severity.toUpperCase()} valueColor={selected.severity === 'critical' ? 'text-red-400' : 'text-orange-400'} />
+                <MetricRow label="Category"  value={selected.category} />
+                <MetricRow label="File"      value={selected.file} mono />
+                <MetricRow label="Line"      value={String(selected.line)} mono />
+                {selected.cve && <MetricRow label="CVE" value={selected.cve} valueColor="text-red-400" mono />}
+              </div>
+            </div>
+          </>
+        )}
+      </DetailDrawer>
+    </div>
+  )
+}

@@ -1,0 +1,29 @@
+{
+  "name": "devguardian-ai-backend",
+  "version": "1.0.0",
+  "description": "DevGuardian AI Backend",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js",
+    "test": "jest --runInBand --forceExit"
+  },
+  "dependencies": {
+    "adm-zip": "^0.5.10",
+    "axios": "^1.6.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "fs-extra": "^11.2.0",
+    "glob": "^10.3.10",
+    "multer": "^1.4.5-lts.1",
+    "simple-git": "^3.22.0",
+    "tmp": "^0.2.3",
+    "uuid": "^9.0.0"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "nodemon": "^3.0.2",
+    "supertest": "^6.3.4"
+  }
+}
